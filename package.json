@@ -1,6 +1,6 @@
 {
 	"name": "scan-chart-web",
-	"version": "3.3.4-1",
+	"version": "3.4.5-1",
 	"author": "Geo & Eli",
 	"license": "MIT",
 	"main": "dist/index.js",
@@ -30,7 +30,7 @@
 		"lodash": "^4.17.21",
 		"midievents": "^2.0.0",
 		"midifile": "^2.0.0",
-		"parse-sng": "^3.1.0",
+		"parse-sng": "^3.1.2",
 		"sanitize-filename": "^1.6.3",
 		"workerpool": "^6.4.0"
 	},

@@ -1,5 +1,48 @@
 # scan-chart
 
+## 3.4.5
+
+### Patch Changes
+
+- 49dd04f: Fix open/tap/force modifiers in .mid parsing
+
+## 3.4.4
+
+### Patch Changes
+
+- 8bfdb05: Improve performance
+
+## 3.4.3
+
+### Patch Changes
+
+- c5e225e: Update dependencies
+
+## 3.4.2
+
+### Patch Changes
+
+- d62a214: Ignore invalid track name meta events
+
+## 3.4.1
+
+### Patch Changes
+
+- 49816d7: Fix vocals and sustains detection
+
+## 3.4.0
+
+### Minor Changes
+
+- 3df1a89: Added drumType and related features
+
+## 3.3.5
+
+### Patch Changes
+
+- a38f98c: Fix import
+- ee16732: Internal refactor
+
 ## 3.3.4
 
 ### Patch Changes

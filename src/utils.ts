@@ -47,6 +47,21 @@ export function getBasename(fileName: string) {
 }
 
 /**
+ * @returns extension of a file, including the dot. (e.g. "song.ogg" -> ".ogg")
+ */
+export function getExtension(fileName: string) {
+	return parse(fileName).ext
+}
+
+/**
+ *
+ * @returns basename of a file, without the extension. (e.g. "song.ogg" -> "song")
+ */
+export function getBasename(fileName: string) {
+	return parse(fileName).name
+}
+
+/**
  * @returns `true` if `name` has a valid sng file extension.
  */
 export function hasSngExtension(name: string) {

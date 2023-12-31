@@ -11,6 +11,7 @@ type TrackName = InstrumentName | 'PART VOCALS' | 'EVENTS'
 type InstrumentName = keyof typeof instrumentNameMap
 const instrumentNameMap = {
 	'PART GUITAR': 'guitar',
+	'PART GUITAR COOP': 'guitarcoop',
 	'PART RHYTHM': 'rhythm',
 	'PART BASS': 'bass',
 	'PART DRUMS': 'drums',
@@ -47,6 +48,7 @@ class MidiParser {
 	constructor(midiFile: MIDIFile) {
 		this.notesData = {
 			instruments: [],
+			drumType: null,
 			hasSoloSections: false,
 			hasLyrics: false,
 			hasVocals: false,
@@ -77,7 +79,7 @@ class MidiParser {
 			switch (midiEvent.type) {
 				case EVENT_META: {
 					switch (midiEvent.subtype) {
-						case EVENT_META_TRACK_NAME: trackNameEvents.push(midiEvent); break
+						case EVENT_META_TRACK_NAME: if (midiEvent.playTime === 0) { trackNameEvents.push(midiEvent) } break
 						case EVENT_META_SET_TEMPO: this.tempoMap.push(midiEvent); break
 						case EVENT_META_TIME_SIGNATURE: this.timeSignatures.push(midiEvent); break
 						case EVENT_META_LYRICS: break // Ignored
@@ -121,18 +123,17 @@ class MidiParser {
 				const trackEventGroups = _.chain(t.trackEvents)
 					.map(te => this.getTrackEventEnds(te, instrument))
 					.filter(te => te.type !== null) // Discard unknown event types
-					.thru(te => this.applyAndRemoveOpenAndTapModifiers(te))
-					.groupBy(te => te.difficulty) // Instrument-wide events have a difficulty of `null`. `groupBy` sets this to 'null'
+					.groupBy(te => te.difficulty) // Global modifiers have a difficulty of `null`. `groupBy` sets this to 'null'
 					.toPairs()
-					.map(([difficulty, te]) => [difficulty, this.getTrackEvents(te)] as const)
+					.thru(groups => this.distributeGlobalModifiers(groups)) // Removes group for difficulty of `null`
+					.map(([difficulty, te]) => [difficulty, this.getTrackEvents(te)] as [string, TrackEventDiff[]])
+					.thru(te => this.applyAndRemoveModifiers(te))
 					.value()
-				const instrumentEvents = _.remove(trackEventGroups, g => g[0] === 'null')[0]?.[1] ?? [] // Pull out instrument-wide events
-				trackEventGroups.forEach(g => g[1].push(...instrumentEvents)) // ... and add each one to all difficulties
 
 				return trackEventGroups.map(g => ({
 					instrument,
 					difficulty: g[0] as Difficulty,
-					trackEvents: g[1].map(te => _.omit(te, 'difficulty')),
+					trackEvents: g[1],
 				}))
 			})
 			.flatMap()
@@ -148,7 +149,7 @@ class MidiParser {
 			if (eventData[0] === 'P' && eventData[1] === 'S' && eventData[2] === '\0' && event.data[3] === 0x00) {
 				// Phase Shift SysEx event
 				return {
-					difficulty: sysExDifficultyMap[event.data[4]],
+					difficulty: event.data[4] == 0xFF ? null : sysExDifficultyMap[event.data[4]],
 					time: event.playTime!,
 					type: event.data[5] === 0x01 ? EventType.open : event.data[5] === 0x04 ? EventType.tap : null,
 					isStart: event.data[6] === 0x01,
@@ -163,12 +164,7 @@ class MidiParser {
 			return {
 				difficulty,
 				time: event.playTime!,
-				type: note === 103 ? EventType.soloMarker
-					: note === 116 ? EventType.starPower
-						: note >= 120 && note <= 124 ? EventType.activationLane
-							: note === 126 ? EventType.rollLaneSingle
-								: note === 127 ? EventType.rollLaneDouble
-									: null,
+				type: this.getInstrumentEventType(note),
 				isStart: event.subtype === EVENT_MIDI_NOTE_ON,
 			}
 		}
@@ -179,6 +175,24 @@ class MidiParser {
 			type: (['guitarghl', 'guitarcoopghl', 'rhythmghl', 'bassghl'].includes(instrument) ? this.get6FretNoteType(note, difficulty) :
 				instrument === 'drums' ? this.getDrumsNoteType(note, difficulty) : this.get5FretNoteType(note, difficulty)) ?? null,
 			isStart: event.subtype === EVENT_MIDI_NOTE_ON,
+		}
+	}
+
+	private getInstrumentEventType(note: number) {
+		switch (note) {
+			case 103: return EventType.soloMarker
+			case 110: return EventType.yellowTomOrCymbalMarker
+			case 111: return EventType.blueTomOrCymbalMarker
+			case 112: return EventType.greenTomOrCymbalMarker
+			case 116: return EventType.starPower
+			case 120: return EventType.activationLane
+			case 121: return EventType.activationLane
+			case 122: return EventType.activationLane
+			case 123: return EventType.activationLane
+			case 124: return EventType.activationLane
+			case 126: return EventType.rollLaneSingle
+			case 127: return EventType.rollLaneDouble
+			default: return null
 		}
 	}
 
@@ -220,40 +234,30 @@ class MidiParser {
 		}
 	}
 
-	/** Any note that begins during an open/tap SYSEX event is converted to an open/tap. */
-	private applyAndRemoveOpenAndTapModifiers(trackEventEnds: TrackEventEnd[]) {
-		const reducedTrackEventEnds: TrackEventEnd[] = []
+	/**
+	 * Any Sysex modifiers with difficulty 0xFF are meant to apply to all charted difficulties.
+	 * In `groups`, these have difficulty `'null'`.
+	 */
+	private distributeGlobalModifiers(groups: [string, TrackEventEnd[]][]) {
+		const globalModifiers = _.remove(groups, g => g[0] === 'null')[0]?.[1] ?? []
 
-		let [openEnabled, tapEnabled] = [false, false]
-		for (const trackEventEnd of _.sortBy(trackEventEnds, te => te.time)) {
-			switch (trackEventEnd.type) {
-				case EventType.open: openEnabled = trackEventEnd.isStart; continue
-				case EventType.tap: tapEnabled = trackEventEnd.isStart; continue
-				case EventType.starPower: break
-				case EventType.soloMarker: break
-				case EventType.activationLane: break
-				case EventType.rollLaneSingle: break
-				case EventType.rollLaneDouble: break
-				case EventType.force: break
-				default: {
-					if (openEnabled) { trackEventEnd.type = EventType.open }
-					if (tapEnabled && trackEventEnd.isStart) {
-						const tapMarker = _.clone(trackEventEnd)
-						tapMarker.type = EventType.tap
-						reducedTrackEventEnds.push(tapMarker)
-					}
-				}
+		for (const modifier of globalModifiers) {
+			for (const group of groups) {
+				const difficultyModifier = _.clone(modifier)
+				difficultyModifier.difficulty = group[0] as Difficulty
+				group[1].push(difficultyModifier)
 			}
-			reducedTrackEventEnds.push(trackEventEnd)
 		}
-		return reducedTrackEventEnds
+
+		return groups
 	}
 
 	/** Assumes `trackEventEnds` are all events belonging to the same instrument and difficulty. */
 	private getTrackEvents(trackEventEnds: TrackEventEnd[]) {
 		const trackEvents: TrackEventDiff[] = []
 		const lastTrackEventEnds: Partial<{ [type in EventType]: TrackEventEnd }> = {}
-		const zeroLengthEventTypes = [EventType.force, EventType.soloMarker, EventType.activationLane, EventType.kick, EventType.kick2x]
+		// Note: open, tap, and force are all "sustains" that mark notes under them as that type
+		const zeroLengthEventTypes = [EventType.soloMarker, EventType.activationLane, EventType.kick, EventType.kick2x]
 
 		for (const trackEventEnd of trackEventEnds) {
 			const lastTrackEventEnd = lastTrackEventEnds[trackEventEnd.type!]
@@ -278,7 +282,60 @@ class MidiParser {
 				delete lastTrackEventEnds[trackEventEnd.type!]
 			}
 		}
-		return trackEvents
+
+		return _.sortBy(trackEvents, te => te.time, te => te.type)
+	}
+
+	/** Any note that begins during a modifier "sustain" is converted to that type. (open, tap, force) */
+	private applyAndRemoveModifiers(groups: [string, TrackEventDiff[]][]) {
+		for (const group of groups) {
+			const reducedTrackEventDiffs: TrackEventDiff[] = []
+			let [lastOpen, lastTap, lastForce] = [{ time: -1, length: 0 }, { time: -1, length: 0 }, { time: -1, length: 0 }]
+			let [lastTapMarkerTime, lastForceMarkerTime] = [-1, -1]
+
+			for (const trackEventDiff of group[1]) {
+				switch (trackEventDiff.type) {
+					case EventType.open: lastOpen = trackEventDiff; continue
+					case EventType.tap: lastTap = trackEventDiff; continue
+					case EventType.force: lastForce = trackEventDiff; continue
+					case EventType.starPower: break
+					case EventType.soloMarker: break
+					case EventType.activationLane: break
+					case EventType.rollLaneSingle: break
+					case EventType.rollLaneDouble: break
+					default: {
+						if (trackEventDiff.time >= lastOpen.time && trackEventDiff.time < lastOpen.time + lastOpen.length) {
+							trackEventDiff.type = EventType.open
+						} else if (trackEventDiff.time >= lastTap.time && trackEventDiff.time < lastTap.time + lastTap.length) {
+							if (lastTapMarkerTime !== trackEventDiff.time) { // Only create one tap marker per tick
+								lastTapMarkerTime = trackEventDiff.time
+								reducedTrackEventDiffs.push({
+									difficulty: trackEventDiff.difficulty,
+									time: trackEventDiff.time,
+									length: 0,
+									type: EventType.tap,
+								})
+							}
+						} else if (trackEventDiff.time >= lastForce.time && trackEventDiff.time < lastForce.time + lastForce.length) {
+							if (lastForceMarkerTime !== trackEventDiff.time) { // Only create one force marker per tick
+								lastForceMarkerTime = trackEventDiff.time
+								reducedTrackEventDiffs.push({
+									difficulty: trackEventDiff.difficulty,
+									time: trackEventDiff.time,
+									length: 0,
+									type: EventType.force,
+								})
+							}
+						}
+					}
+				}
+				reducedTrackEventDiffs.push(trackEventDiff)
+			}
+
+			group[1] = reducedTrackEventDiffs
+		}
+
+		return groups
 	}
 
 	/** Sustains shorter than a 1/12th step are cut off and turned into a normal (non-sustain) note. */
@@ -328,9 +385,9 @@ class MidiParser {
 		const vocalEvents = this.tracks.find(t => t.trackName === 'PART VOCALS')?.trackEvents
 		if (vocalEvents?.length) {
 			this.notesData.hasLyrics = true
-			if (vocalEvents.find(te => te.param1! !== 105 && te.param1! !== 106)) {
-				this.notesData.hasVocals = true
-			}
+			if (vocalEvents.find(
+				te => te.param1! !== 105 && te.param1! !== 106 && !(te.type === EVENT_META && te.subtype === EVENT_META_TEXT))
+			) { this.notesData.hasVocals = true }
 		}
 		const sectionEvents = _.chain(this.tracks.find(t => t.trackName === 'EVENTS')?.trackEvents ?? [])
 			.map(ete => ete.data?.map(dta => String.fromCharCode(dta)).join('') ?? '')

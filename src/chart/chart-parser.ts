@@ -14,6 +14,11 @@ const trackNameMap = {
 	MediumSingle: { instrument: 'guitar', difficulty: 'medium' },
 	EasySingle: { instrument: 'guitar', difficulty: 'easy' },
 
+	ExpertDoubleGuitar: { instrument: 'guitarcoop', difficulty: 'expert' },
+	HardDoubleGuitar: { instrument: 'guitarcoop', difficulty: 'hard' },
+	MediumDoubleGuitar: { instrument: 'guitarcoop', difficulty: 'medium' },
+	EasyDoubleGuitar: { instrument: 'guitarcoop', difficulty: 'easy' },
+
 	ExpertDoubleRhythm: { instrument: 'rhythm', difficulty: 'expert' },
 	HardDoubleRhythm: { instrument: 'rhythm', difficulty: 'hard' },
 	MediumDoubleRhythm: { instrument: 'rhythm', difficulty: 'medium' },
@@ -69,6 +74,7 @@ class ChartParser {
 	constructor(private fileSections: { [sectionName: string]: string[] }) {
 		this.notesData = {
 			instruments: [],
+			drumType: null,
 			hasSoloSections: false,
 			hasLyrics: false,
 			hasVocals: false,
@@ -260,6 +266,9 @@ class ChartParser {
 							case '4': return EventType.orange
 							case '5': return EventType.green
 							case '32': return EventType.kick2x
+							case '66': return EventType.yellowTomOrCymbalMarker
+							case '67': return EventType.blueTomOrCymbalMarker
+							case '68': return EventType.greenTomOrCymbalMarker
 							default: return null
 						}
 					}
